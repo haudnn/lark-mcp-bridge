@@ -16,7 +16,7 @@ FROM node:22-alpine AS runtime
 
 WORKDIR /app
 
-# Pre-install lark-mcp globally to avoid npx download delay on first call
+# Pre-install lark-mcp globally to avoid npx download delay on first run
 RUN npm install -g @larksuiteoapi/lark-mcp
 
 COPY package*.json ./
@@ -24,13 +24,12 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
 
-# MCP endpoint (lark-mcp)
+# Tini for proper signal forwarding to Node.js subprocess
+RUN apk add --no-cache tini libsecret
+
+# Single public port — PaaS platforms inject PORT automatically.
+# Default 3000 for local Docker runs.
 EXPOSE 3000
-# Health-check endpoint (this bridge)
-EXPOSE 3001
 
-# Tini for proper signal forwarding
-RUN apk add --no-cache tini
 ENTRYPOINT ["/sbin/tini", "--"]
-
 CMD ["node", "dist/index.js"]

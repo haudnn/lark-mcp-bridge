@@ -3,19 +3,17 @@ import { spawn, ChildProcess } from "child_process";
 export interface LarkMcpConfig {
   appId: string;
   appSecret: string;
+  /** Internal host — always 127.0.0.1, never exposed publicly */
   host: string;
+  /** Internal port — web server proxies to this */
   port: string;
   domain?: string;
   tools?: string;
 }
 
 /**
- * Spawns @larksuiteoapi/lark-mcp in streamable-HTTP mode.
- * The MCP endpoint will be available at http://{host}:{port}/mcp
- *
- * NOTE: lark-mcp's CLI requires credentials as arguments — there is no
- * env-var alternative in the current SDK. The subprocess inherits
- * process.env so any variables set there will also be available.
+ * Spawns @larksuiteoapi/lark-mcp in streamable-HTTP mode on an internal port.
+ * The web server (index.ts) proxies public traffic to this internal endpoint.
  */
 export function startLarkMcp(config: LarkMcpConfig): ChildProcess {
   const args: string[] = [
@@ -29,17 +27,10 @@ export function startLarkMcp(config: LarkMcpConfig): ChildProcess {
     "-p", config.port,
   ];
 
-  if (config.domain) {
-    args.push("--domain", config.domain);
-  }
+  if (config.domain) args.push("--domain", config.domain);
+  if (config.tools)  args.push("-t", config.tools);
 
-  if (config.tools) {
-    args.push("-t", config.tools);
-  }
-
-  console.log(
-    `[bridge] Starting lark-mcp in streamable mode on ${config.host}:${config.port}`
-  );
+  console.log(`[bridge] Starting lark-mcp internally on ${config.host}:${config.port}`);
 
   const proc = spawn("npx", args, {
     stdio: ["inherit", "inherit", "inherit"],
@@ -47,16 +38,14 @@ export function startLarkMcp(config: LarkMcpConfig): ChildProcess {
   });
 
   proc.on("error", (err) => {
-    console.error("[bridge] Failed to start lark-mcp process:", err.message);
+    console.error("[bridge] Failed to start lark-mcp:", err.message);
   });
 
   proc.on("exit", (code, signal) => {
     if (code !== 0) {
-      console.error(
-        `[bridge] lark-mcp exited unexpectedly — code=${code ?? "null"} signal=${signal ?? "null"}`
-      );
+      console.error(`[bridge] lark-mcp exited — code=${code ?? "null"} signal=${signal ?? "null"}`);
     } else {
-      console.log("[bridge] lark-mcp process exited cleanly.");
+      console.log("[bridge] lark-mcp exited cleanly.");
     }
   });
 
