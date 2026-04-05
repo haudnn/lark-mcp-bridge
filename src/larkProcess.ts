@@ -63,30 +63,53 @@ export function startLarkMcp(config: LarkMcpConfig): ChildProcess {
 /**
  * Polls lark-mcp's internal HTTP endpoint until it responds (or times out).
  * Any HTTP response (even 405) means the server is up and accepting connections.
+ * Rejects immediately if the lark-mcp process exits before becoming ready.
  */
 export function waitForLarkMcp(
+  proc: ChildProcess,
   host: string,
   port: number,
-  timeoutMs = 30_000,
+  timeoutMs = 60_000,
   intervalMs = 500
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    let settled = false;
     const deadline = Date.now() + timeoutMs;
 
+    const done = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      if (err) reject(err);
+      else resolve();
+    };
+
+    // Fail fast if the process dies before the probe succeeds
+    proc.once("exit", (code, signal) => {
+      done(new Error(`lark-mcp exited before becoming ready — code=${code ?? "null"} signal=${signal ?? "null"}`));
+    });
+
+    let attempt = 0;
     const probe = () => {
+      if (settled) return;
+      attempt++;
+
       const req = http.request(
-        { hostname: host, port, path: "/mcp", method: "GET", timeout: 1000 },
+        { hostname: host, port, path: "/mcp", method: "GET", timeout: 2000 },
         (res) => {
           res.resume();
-          console.log(`[bridge] lark-mcp ready (HTTP ${res.statusCode})`);
-          resolve();
+          console.log(`[bridge] lark-mcp ready after ${attempt} probe(s) (HTTP ${res.statusCode})`);
+          done();
         }
       );
 
-      req.on("error", () => {
+      req.on("error", (err) => {
+        if (settled) return;
         if (Date.now() >= deadline) {
-          reject(new Error(`lark-mcp did not become ready within ${timeoutMs}ms`));
+          done(new Error(`lark-mcp did not become ready within ${timeoutMs}ms (${attempt} probes)`));
         } else {
+          if (attempt % 10 === 0) {
+            console.log(`[bridge] Still waiting for lark-mcp... (${attempt} probes, ${Math.round((deadline - Date.now()) / 1000)}s left)`);
+          }
           setTimeout(probe, intervalMs);
         }
       });

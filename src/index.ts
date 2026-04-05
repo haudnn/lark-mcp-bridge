@@ -85,9 +85,10 @@ const server = http.createServer((req, res) => {
   req.pipe(proxyReq, { end: true });
 });
 
-// ─── Startup sequence ─────────────────────────────────────────────────────────
-async function start(): Promise<void> {
-  // 1. Start lark-mcp subprocess
+// ─── Launch lark-mcp + wait for readiness (restarts on crash) ────────────────
+async function launchLarkMcp(): Promise<void> {
+  larkReady = false;
+
   larkProc = startLarkMcp({
     appId:     LARK_APP_ID,
     appSecret: LARK_APP_SECRET,
@@ -97,7 +98,28 @@ async function start(): Promise<void> {
     tools:     LARK_TOOLS,
   });
 
-  // 2. Start web server immediately (returns 503 while lark-mcp warms up)
+  // When lark-mcp exits after being ready, mark not-ready and schedule restart
+  larkProc.once("exit", (code, signal) => {
+    if (larkReady) {
+      larkReady = false;
+      console.error(`[bridge] lark-mcp crashed (code=${code ?? "null"} signal=${signal ?? "null"}) — restarting in 2s...`);
+      setTimeout(() => {
+        launchLarkMcp().catch((err) => {
+          console.error("[bridge] lark-mcp restart failed:", err.message);
+        });
+      }, 2000);
+    }
+  });
+
+  // 3. Wait for lark-mcp to accept connections (fail fast if process exits)
+  await waitForLarkMcp(larkProc, LARK_INTERNAL_HOST, LARK_INTERNAL_PORT, 60_000);
+  larkReady = true;
+  console.log(`[bridge] lark-mcp ready — proxying /mcp → ${LARK_INTERNAL_HOST}:${LARK_INTERNAL_PORT}/mcp`);
+}
+
+// ─── Startup sequence ─────────────────────────────────────────────────────────
+async function start(): Promise<void> {
+  // 1. Start web server immediately (returns 503 while lark-mcp warms up)
   await new Promise<void>((resolve) => {
     server.listen(WEB_PORT, "0.0.0.0", () => {
       console.log(`[bridge] Web server       → http://0.0.0.0:${WEB_PORT}`);
@@ -109,10 +131,8 @@ async function start(): Promise<void> {
     });
   });
 
-  // 3. Wait for lark-mcp to accept connections
-  await waitForLarkMcp(LARK_INTERNAL_HOST, LARK_INTERNAL_PORT, 30_000);
-  larkReady = true;
-  console.log(`[bridge] Ready — proxying http://0.0.0.0:${WEB_PORT}/mcp → ${LARK_INTERNAL_HOST}:${LARK_INTERNAL_PORT}/mcp`);
+  // 2. Launch lark-mcp and wait for it to be ready
+  await launchLarkMcp();
 }
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
