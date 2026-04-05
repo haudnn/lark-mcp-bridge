@@ -16,9 +16,8 @@ FROM node:22-alpine AS runtime
 
 WORKDIR /app
 
-# Pre-install lark-mcp globally to avoid npx download delay on first run
-RUN npm install -g @larksuiteoapi/lark-mcp
-
+# @larksuiteoapi/lark-mcp is a direct dependency — npm ci installs it into
+# node_modules/.bin/lark-mcp so no global install or npx download is needed.
 COPY package*.json ./
 RUN npm ci --omit=dev
 

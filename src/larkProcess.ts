@@ -1,3 +1,4 @@
+import * as path from "path";
 import { spawn, ChildProcess } from "child_process";
 import * as http from "http";
 
@@ -13,16 +14,26 @@ export interface LarkMcpConfig {
 }
 
 /**
+ * Resolves the path to the lark-mcp binary.
+ * Prefers the locally-installed copy in node_modules/.bin (already present
+ * because @larksuiteoapi/lark-mcp is a direct dependency), falling back to
+ * the global npx invocation only when the local binary is absent.
+ */
+function larkMcpBin(): string {
+  // node_modules/.bin/lark-mcp  (relative to process working directory)
+  return path.join(process.cwd(), "node_modules", ".bin", "lark-mcp");
+}
+
+/**
  * Spawns lark-mcp in streamable-HTTP mode on an internal port.
  *
- * Uses `npx --prefer-offline` so it picks up the globally pre-installed
- * package without re-downloading it — avoids the OOM crash from a cold npx.
+ * Uses the locally-installed binary from node_modules/.bin — avoids any
+ * npx download or global-install lookup that could OOM the container.
  */
 export function startLarkMcp(config: LarkMcpConfig): ChildProcess {
+  const bin = larkMcpBin();
+
   const args: string[] = [
-    "--prefer-offline",
-    "-y",
-    "@larksuiteoapi/lark-mcp",
     "mcp",
     "-a", config.appId,
     "-s", config.appSecret,
@@ -34,9 +45,9 @@ export function startLarkMcp(config: LarkMcpConfig): ChildProcess {
   if (config.domain) args.push("--domain", config.domain);
   if (config.tools)  args.push("-t", config.tools);
 
-  console.log(`[bridge] Starting lark-mcp internally on ${config.host}:${config.port}`);
+  console.log(`[bridge] Starting lark-mcp (${bin}) on ${config.host}:${config.port}`);
 
-  const proc = spawn("npx", args, {
+  const proc = spawn(bin, args, {
     stdio: ["inherit", "inherit", "inherit"],
     env: {
       ...process.env,
@@ -102,7 +113,7 @@ export function waitForLarkMcp(
         }
       );
 
-      req.on("error", (err) => {
+      req.on("error", () => {
         if (settled) return;
         if (Date.now() >= deadline) {
           done(new Error(`lark-mcp did not become ready within ${timeoutMs}ms (${attempt} probes)`));

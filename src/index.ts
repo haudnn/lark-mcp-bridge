@@ -57,19 +57,39 @@ const server = http.createServer((req, res) => {
   }
 
   // Proxy all other requests → internal lark-mcp
+  // Strip hop-by-hop headers that must not be forwarded by a proxy.
+  const HOP_BY_HOP = new Set([
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+    "te", "trailers", "transfer-encoding", "upgrade",
+  ]);
+
+  const forwardHeaders: http.OutgoingHttpHeaders = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (!HOP_BY_HOP.has(k.toLowerCase())) forwardHeaders[k] = v;
+  }
+  forwardHeaders["host"] = `${LARK_INTERNAL_HOST}:${LARK_INTERNAL_PORT}`;
+
   const proxyReq = http.request(
     {
       hostname: LARK_INTERNAL_HOST,
       port: LARK_INTERNAL_PORT,
       path: url,
       method: req.method,
-      headers: {
-        ...req.headers,
-        host: `${LARK_INTERNAL_HOST}:${LARK_INTERNAL_PORT}`,
-      },
+      headers: forwardHeaders,
     },
     (proxyRes) => {
-      res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers);
+      // Build clean response headers — strip hop-by-hop, add SSE hints.
+      const resHeaders: http.OutgoingHttpHeaders = {};
+      for (const [k, v] of Object.entries(proxyRes.headers)) {
+        if (!HOP_BY_HOP.has(k.toLowerCase())) resHeaders[k] = v;
+      }
+      const isSSE = String(proxyRes.headers["content-type"] ?? "").includes("text/event-stream");
+      if (isSSE) {
+        // Prevent nginx / PaaS reverse proxies from buffering the SSE stream.
+        resHeaders["x-accel-buffering"] = "no";
+        resHeaders["cache-control"] = "no-cache";
+      }
+      res.writeHead(proxyRes.statusCode ?? 200, resHeaders);
       proxyRes.pipe(res, { end: true });
     }
   );
