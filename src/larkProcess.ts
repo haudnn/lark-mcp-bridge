@@ -1,4 +1,5 @@
 import * as path from "path";
+import * as fs from "fs";
 import { spawn, ChildProcess } from "child_process";
 import * as http from "http";
 
@@ -44,6 +45,19 @@ export function startLarkMcp(config: LarkMcpConfig): ChildProcess {
 
   if (config.domain) args.push("--domain", config.domain);
   if (config.tools)  args.push("-t", config.tools);
+
+  // ── Diagnostics: verify binary exists before spawning ──────────────────────
+  console.log(`[bridge] cwd: ${process.cwd()}`);
+  console.log(`[bridge] lark-mcp binary path: ${bin}`);
+  console.log(`[bridge] binary exists: ${fs.existsSync(bin)}`);
+  try {
+    const larkBins = fs.readdirSync(path.join(process.cwd(), "node_modules", ".bin"))
+      .filter(f => f.toLowerCase().includes("lark"));
+    console.log(`[bridge] lark-related bins in node_modules/.bin:`, larkBins);
+  } catch (e) {
+    console.error(`[bridge] could not list node_modules/.bin:`, (e as Error).message);
+  }
+  // ────────────────────────────────────────────────────────────────────────────
 
   console.log(`[bridge] Starting lark-mcp (${bin}) on ${config.host}:${config.port}`);
 
