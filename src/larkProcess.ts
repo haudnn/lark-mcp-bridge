@@ -14,16 +14,21 @@ export interface LarkMcpConfig {
 
 /**
  * Spawns lark-mcp in streamable-HTTP mode on an internal port.
- * Uses the globally installed binary to avoid npx download overhead and OOM.
+ *
+ * Uses `npx --prefer-offline` so it picks up the globally pre-installed
+ * package without re-downloading it — avoids the OOM crash from a cold npx.
  */
 export function startLarkMcp(config: LarkMcpConfig): ChildProcess {
   const args: string[] = [
+    "--prefer-offline",
+    "-y",
+    "@larksuiteoapi/lark-mcp",
     "mcp",
     "-a", config.appId,
     "-s", config.appSecret,
     "--mode", "streamable",
     "--host", config.host,
-    "-p", config.port,
+    "-p",    config.port,
   ];
 
   if (config.domain) args.push("--domain", config.domain);
@@ -31,11 +36,11 @@ export function startLarkMcp(config: LarkMcpConfig): ChildProcess {
 
   console.log(`[bridge] Starting lark-mcp internally on ${config.host}:${config.port}`);
 
-  const proc = spawn("lark-mcp", args, {
+  const proc = spawn("npx", args, {
     stdio: ["inherit", "inherit", "inherit"],
     env: {
       ...process.env,
-      // Limit lark-mcp heap to avoid container OOM; adjust if needed
+      // Cap lark-mcp heap to avoid container OOM
       NODE_OPTIONS: "--max-old-space-size=256",
     },
   });
@@ -57,7 +62,7 @@ export function startLarkMcp(config: LarkMcpConfig): ChildProcess {
 
 /**
  * Polls lark-mcp's internal HTTP endpoint until it responds (or times out).
- * Resolves when ready, rejects on timeout.
+ * Any HTTP response (even 405) means the server is up and accepting connections.
  */
 export function waitForLarkMcp(
   host: string,
@@ -72,7 +77,6 @@ export function waitForLarkMcp(
       const req = http.request(
         { hostname: host, port, path: "/mcp", method: "GET", timeout: 1000 },
         (res) => {
-          // Any HTTP response (including 405 Method Not Allowed) means it's up
           res.resume();
           console.log(`[bridge] lark-mcp ready (HTTP ${res.statusCode})`);
           resolve();
